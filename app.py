@@ -456,8 +456,8 @@ def handle_text(message):
         reply_text = (
             f"Em đã nhận được tên tài khoản: *{username_game}* ✅\n\n"
             "Mình vào GG88 lên vốn theo mốc để nhận khuyến mãi giúp em nhé.\n\n"
-            "Lên thành công mình gửi *ảnh chuyển khoản* để em cộng điểm trực tiếp vào tài khoản cho mình ạ.\n\n"
-            "Có bất cứ thắc mắc gì nhắn tin trực tiếp cho CSKH U888:\n"
+            "Lên thành công mình gửi *ảnh chuyển khoản* để admin cộng điểm trực tiếp vào tài khoản cho mình nhé.\n\n"
+            "Trang mới đang auto lên km. Có bất cứ thắc mắc gì nhắn tin trực tiếp cho CSKH GG88 ạ:\n"
             "👉 [Thùy Nhi CSKH GG88](https://t.me/thuynhi247)\n"
         )
 
@@ -519,7 +519,7 @@ def handle_media(message):
 
     bot.send_message(
         chat_id,
-        "🔔Dạ mình vui vòng cho em xin 4 số đuôi của tài khoản ngân hàng 🧾 với ạ!",
+        "🔔Dạ mình thường chơi hũ hay bcr hay bóng anh nhỉ 🧾 admin sẽ có những khuyến mãi hot dành riêng cho mình nè!",
         parse_mode="Markdown"
     )
 
