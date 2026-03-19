@@ -314,7 +314,7 @@ def ask_account_status(chat_id):
     try:
         bot.send_photo(
             chat_id,
-            "AgACAgUAAxkBAAMNabwGwy2JojJSdIZX10JeFki1nA0AAqQQaxveZOFVrqBWS9QIKQsBAAMCAAN5AAM6BA",
+            "AgACAgUAAxkBAAMUabwIZVqf50DY1eD-5y9DpFaa9pMAAqwQaxveZOFVLqsTsxa-eWsBAAMCAAN4AAM6BA",
             caption=text,
             reply_markup=markup
         )
