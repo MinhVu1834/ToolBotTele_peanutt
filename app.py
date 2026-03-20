@@ -19,8 +19,8 @@ WEBAPP_LINK = "https://gg88k.xyz"  # hiện chưa dùng, để sẵn
 
 # Keep-alive
 ENABLE_KEEP_ALIVE = os.getenv("ENABLE_KEEP_ALIVE", "false").lower() == "true"
-PING_URL = os.getenv("PING_URL")  # ví dụ: https://your-app.onrender.com/
-PING_INTERVAL = int(os.getenv("PING_INTERVAL", "300"))  # 5 phút
+PING_URL = os.getenv("PING_URL")
+PING_INTERVAL = int(os.getenv("PING_INTERVAL", "300"))
 
 # ============ KHỞI TẠO ============
 
@@ -28,11 +28,11 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 server = Flask(__name__)
 
 # State user (RAM)
-user_state = {}       # {chat_id: "WAITING_USERNAME" ... hoặc dict}
+user_state = {}
 debug_get_id_mode = set()
 
 # Admin broadcast state (RAM)
-admin_state = {}      # {chat_id: {"mode": "BROADCAST_WAIT_MEDIA", "payload": {...}}}
+admin_state = {}
 
 # ============ DB LƯU USERS (POSTGRES) ============
 
@@ -44,6 +44,10 @@ def db_conn():
 
 
 def init_db():
+    if not DATABASE_URL:
+        print("⚠️ DATABASE_URL chưa có, bot vẫn chạy nhưng không lưu user vào DB.")
+        return
+
     with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -59,45 +63,56 @@ def init_db():
 def upsert_user(chat_id: int):
     if not DATABASE_URL:
         return
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO users(chat_id)
-                VALUES (%s)
-                ON CONFLICT (chat_id)
-                DO UPDATE SET last_seen = NOW()
-            """, (chat_id,))
-        conn.commit()
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users(chat_id)
+                    VALUES (%s)
+                    ON CONFLICT (chat_id)
+                    DO UPDATE SET last_seen = NOW()
+                """, (chat_id,))
+            conn.commit()
+    except Exception as e:
+        print("Lỗi upsert_user:", e)
 
 
 def count_users():
     if not DATABASE_URL:
         return 0
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM users")
-            return cur.fetchone()[0]
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM users")
+                return cur.fetchone()[0]
+    except Exception as e:
+        print("Lỗi count_users:", e)
+        return 0
 
 
 def get_all_users():
     if not DATABASE_URL:
         return []
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT chat_id FROM users")
-            return [row[0] for row in cur.fetchall()]
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT chat_id FROM users")
+                return [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        print("Lỗi get_all_users:", e)
+        return []
 
 
 def is_admin(chat_id: int) -> bool:
     return chat_id == ADMIN_CHAT_ID
 
 
-# Init DB (safe)
-if not DATABASE_URL:
-    print("❌ DATABASE_URL chưa có. Vào Render > Service > Environment thêm DATABASE_URL.")
-else:
+try:
     init_db()
-    print("✅ Postgres users table ready.")
+    if DATABASE_URL:
+        print("✅ Postgres users table ready.")
+except Exception as e:
+    print("❌ Lỗi init DB:", e)
 
 # ============ KEEP ALIVE ============
 
@@ -106,6 +121,7 @@ def keep_alive():
     if not PING_URL:
         print("[KEEP_ALIVE] PING_URL chưa cấu hình, không bật keep-alive.")
         return
+
     print(f"[KEEP_ALIVE] Bắt đầu ping {PING_URL} mỗi {PING_INTERVAL}s")
     while True:
         try:
@@ -141,8 +157,8 @@ def disable_getid(message):
     debug_get_id_mode.discard(chat_id)
     bot.send_message(chat_id, "🛑 Đã tắt chế độ lấy FILE_ID.")
 
-
 # ================= ADMIN PANEL + BROADCAST (TEXT/PHOTO/VIDEO) =================
+
 
 @bot.message_handler(commands=["admin"])
 def admin_panel(message):
@@ -201,7 +217,6 @@ def _ask_broadcast_confirm(chat_id: int, preview_text: str):
     )
 
 
-# ---- Nhận TEXT broadcast
 @bot.message_handler(
     func=lambda m: is_admin(m.chat.id) and admin_state.get(m.chat.id, {}).get("mode") == "BROADCAST_WAIT_MEDIA",
     content_types=["text"]
@@ -216,7 +231,6 @@ def admin_receive_broadcast_text(message):
     _ask_broadcast_confirm(chat_id, preview)
 
 
-# ---- Nhận PHOTO broadcast
 @bot.message_handler(
     func=lambda m: is_admin(m.chat.id) and admin_state.get(m.chat.id, {}).get("mode") == "BROADCAST_WAIT_MEDIA",
     content_types=["photo"]
@@ -234,7 +248,6 @@ def admin_receive_broadcast_photo(message):
     _ask_broadcast_confirm(chat_id, preview)
 
 
-# ---- Nhận VIDEO broadcast
 @bot.message_handler(
     func=lambda m: is_admin(m.chat.id) and admin_state.get(m.chat.id, {}).get("mode") == "BROADCAST_WAIT_MEDIA",
     content_types=["video"]
@@ -294,8 +307,8 @@ def admin_broadcast_confirm(call):
     bot.send_message(ADMIN_CHAT_ID, f"✅ Broadcast xong.\nSent: {sent}\nFailed: {failed}")
     bot.answer_callback_query(call.id, "Đã gửi!")
 
+# ============ FLOW USER ============
 
-# ============ FLOW CŨ CỦA BẠN (GIỮ NGUYÊN, CHỈ FIX NHỎ) ============
 
 def ask_account_status(chat_id):
     text = (
@@ -392,17 +405,21 @@ def ask_for_username(chat_id):
     user_state[chat_id] = "WAITING_USERNAME"
 
 
-# ⚠️ FIX: handler này KHÔNG bắt tin nhắn admin khi admin đang ở mode broadcast
-@bot.message_handler(
-    func=lambda m: (not is_admin(m.chat.id) or admin_state.get(m.chat.id, {}).get("mode") != "BROADCAST_WAIT_MEDIA"),
-    content_types=['text']
-)
+@bot.message_handler(content_types=['text'])
 def handle_text(message):
     chat_id = message.chat.id
     upsert_user(chat_id)
 
-    text = message.text.strip()
+    if is_admin(chat_id) and admin_state.get(chat_id, {}).get("mode") == "BROADCAST_WAIT_MEDIA":
+        return
+
+    text = (message.text or "").strip()
     state = user_state.get(chat_id)
+
+    print(">>> TEXT:", text, "STATE:", state, "CHAT_ID:", chat_id)
+
+    if text in ["/start", "/admin", "/cancel", "/getid", "/stopgetid"]:
+        return
 
     # --- WAITING_GAME ---
     if isinstance(state, dict) and state.get("state") == "WAITING_GAME":
@@ -426,7 +443,7 @@ def handle_text(message):
 
             bot.send_message(chat_id, "✅ Em đã nhận đủ thông tin, em xử lý và cộng điểm cho mình ngay nhé ạ ❤️")
         except Exception as e:
-            print("Lỗi gửi admin:", e)
+            print("Lỗi gửi admin WAITING_GAME:", e)
             bot.send_message(chat_id, "⚠️ Em gửi thông tin bị lỗi, mình đợi em 1 chút hoặc nhắn CSKH giúp em nhé ạ.")
 
         user_state[chat_id] = None
@@ -447,11 +464,12 @@ def handle_text(message):
             f"⏰ Thời gian: {time_str}\n"
             f"🆔 Chat ID: {chat_id}"
         )
+
         try:
             bot.send_message(ADMIN_CHAT_ID, admin_text)
             bot.forward_message(ADMIN_CHAT_ID, chat_id, message.message_id)
         except Exception as e:
-            print("Lỗi gửi tin cho admin:", e)
+            print("Lỗi gửi tin cho admin WAITING_USERNAME:", e)
 
         reply_text = (
             f"Em đã nhận được tên tài khoản: *{username_game}* ✅\n\n"
@@ -469,8 +487,11 @@ def handle_text(message):
                 parse_mode="Markdown"
             )
         except Exception as e:
-            print("Lỗi gửi ảnh reply_text:", e)
-            bot.send_message(chat_id, reply_text, parse_mode="Markdown")
+            print("Lỗi gửi ảnh reply_text WAITING_USERNAME:", e)
+            try:
+                bot.send_message(chat_id, reply_text, parse_mode="Markdown", disable_web_page_preview=True)
+            except Exception as e2:
+                print("Lỗi gửi text fallback WAITING_USERNAME:", e2)
 
         return
 
@@ -480,7 +501,6 @@ def handle_media(message):
     chat_id = message.chat.id
     upsert_user(chat_id)
 
-    # --- GET FILE_ID MODE ---
     if chat_id in debug_get_id_mode:
         if message.content_type == 'photo':
             file_id = message.photo[-1].file_id
@@ -495,7 +515,6 @@ def handle_media(message):
         bot.reply_to(message, f"✅ *{media_type} FILE_ID:*\n\n`{file_id}`", parse_mode="Markdown")
         return
 
-    # --- Flow nhận ảnh chuyển khoản ---
     state = user_state.get(chat_id)
 
     if not (isinstance(state, dict) and state.get("state") == "WAITING_RECEIPT"):
@@ -519,12 +538,12 @@ def handle_media(message):
 
     bot.send_message(
         chat_id,
-        "🔔Dạ mình thường chơi hũ hay bcr hay bóng anh nhỉ 🧾 admin sẽ có những khuyến mãi hot dành riêng cho mình nè!",
+        "🔔 Dạ mình thường chơi hũ hay bcr hay bóng anh nhỉ 🧾 admin sẽ có những khuyến mãi hot dành riêng cho mình nè!",
         parse_mode="Markdown"
     )
 
-
 # ============ WEBHOOK FLASK ============
+
 
 @server.route("/webhook", methods=['POST'])
 def telegram_webhook():
@@ -549,5 +568,5 @@ def health():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT", "8000"))
     server.run(host="0.0.0.0", port=port)
