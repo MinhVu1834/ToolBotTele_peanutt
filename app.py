@@ -28,11 +28,8 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 server = Flask(__name__)
 
-# State user (RAM)
-user_state = {}         # vd: {chat_id: "WAITING_USERNAME"} hoặc dict state
+user_state = {}
 debug_get_id_mode = set()
-
-# Admin broadcast state (RAM)
 admin_state = {}
 
 print("=== APP START ===")
@@ -80,7 +77,7 @@ def upsert_user(chat_id: int):
                 """, (chat_id,))
             conn.commit()
     except Exception as e:
-        print("[DB] Lỗi upsert_user:", repr(e))
+        print("[DB] upsert_user error:", repr(e))
 
 
 def count_users():
@@ -93,7 +90,7 @@ def count_users():
                 row = cur.fetchone()
                 return row[0] if row else 0
     except Exception as e:
-        print("[DB] Lỗi count_users:", repr(e))
+        print("[DB] count_users error:", repr(e))
         return 0
 
 
@@ -106,7 +103,7 @@ def get_all_users():
                 cur.execute("SELECT chat_id FROM users")
                 return [row[0] for row in cur.fetchall()]
     except Exception as e:
-        print("[DB] Lỗi get_all_users:", repr(e))
+        print("[DB] get_all_users error:", repr(e))
         return []
 
 
@@ -119,7 +116,7 @@ try:
     if DATABASE_URL:
         print("✅ Postgres users table ready.")
 except Exception as e:
-    print("❌ Lỗi init DB:", repr(e))
+    print("❌ init_db error:", repr(e))
 
 
 # ============ KEEP ALIVE ============
@@ -129,13 +126,13 @@ def keep_alive():
         print("[KEEP_ALIVE] PING_URL chưa cấu hình, không bật keep-alive.")
         return
 
-    print(f"[KEEP_ALIVE] Bắt đầu ping {PING_URL} mỗi {PING_INTERVAL}s")
+    print(f"[KEEP_ALIVE] ping {PING_URL} mỗi {PING_INTERVAL}s")
     while True:
         try:
             r = requests.get(PING_URL, timeout=10)
-            print(f"[KEEP_ALIVE] Ping {PING_URL} -> {r.status_code}")
+            print(f"[KEEP_ALIVE] {PING_URL} -> {r.status_code}")
         except Exception as e:
-            print("[KEEP_ALIVE] Lỗi ping:", repr(e))
+            print("[KEEP_ALIVE] error:", repr(e))
         time.sleep(PING_INTERVAL)
 
 
@@ -145,43 +142,59 @@ if ENABLE_KEEP_ALIVE:
 
 # ============ HÀM PHỤ ============
 
-def log_state(chat_id):
-    print(f"[STATE] user_state[{chat_id}] = {user_state.get(chat_id)}")
+def now_str():
+    return datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+
+
+def tg_username_of(message):
+    return f"@{message.from_user.username}" if getattr(message.from_user, "username", None) else "Không có"
+
+
+def set_state(chat_id, value):
+    user_state[chat_id] = value
+    print(f"[STATE] set chat_id={chat_id} -> {value}")
+
+
+def clear_state(chat_id):
+    user_state[chat_id] = None
+    print(f"[STATE] cleared chat_id={chat_id}")
 
 
 def safe_send_message(chat_id, text, **kwargs):
     try:
         bot.send_message(chat_id, text, **kwargs)
+        print(f"[SEND_MESSAGE] OK -> {chat_id}")
         return True
     except Exception as e:
-        print(f"[SEND_MESSAGE_ERROR] chat_id={chat_id} err={repr(e)}")
+        print(f"[SEND_MESSAGE] ERROR -> {chat_id}: {repr(e)}")
         return False
 
 
 def safe_send_photo(chat_id, photo, **kwargs):
     try:
         bot.send_photo(chat_id, photo, **kwargs)
+        print(f"[SEND_PHOTO] OK -> {chat_id}")
         return True
     except Exception as e:
-        print(f"[SEND_PHOTO_ERROR] chat_id={chat_id} err={repr(e)}")
+        print(f"[SEND_PHOTO] ERROR -> {chat_id}: {repr(e)}")
         return False
 
 
 def safe_forward_message(to_chat_id, from_chat_id, message_id):
     try:
         bot.forward_message(to_chat_id, from_chat_id, message_id)
+        print(f"[FORWARD] OK -> {to_chat_id}")
         return True
     except Exception as e:
-        print(f"[FORWARD_ERROR] to={to_chat_id} from={from_chat_id} msg={message_id} err={repr(e)}")
+        print(f"[FORWARD] ERROR -> {to_chat_id}: {repr(e)}")
         return False
 
 
 def safe_send_admin_message(text):
     if not ADMIN_CHAT_ID:
-        print("[ADMIN] ADMIN_CHAT_ID chưa cấu hình.")
+        print("[ADMIN] ADMIN_CHAT_ID chưa cấu hình")
         return False
     try:
-        print(f"[ADMIN] send_message -> ADMIN_CHAT_ID={ADMIN_CHAT_ID}")
         bot.send_message(ADMIN_CHAT_ID, text)
         print("[ADMIN] send_message OK")
         return True
@@ -192,10 +205,9 @@ def safe_send_admin_message(text):
 
 def safe_send_admin_photo(photo_file_id, caption):
     if not ADMIN_CHAT_ID:
-        print("[ADMIN] ADMIN_CHAT_ID chưa cấu hình.")
+        print("[ADMIN] ADMIN_CHAT_ID chưa cấu hình")
         return False
     try:
-        print(f"[ADMIN] send_photo -> ADMIN_CHAT_ID={ADMIN_CHAT_ID}")
         bot.send_photo(ADMIN_CHAT_ID, photo_file_id, caption=caption)
         print("[ADMIN] send_photo OK")
         return True
@@ -206,34 +218,15 @@ def safe_send_admin_photo(photo_file_id, caption):
 
 def safe_forward_to_admin(from_chat_id, message_id):
     if not ADMIN_CHAT_ID:
-        print("[ADMIN] ADMIN_CHAT_ID chưa cấu hình.")
+        print("[ADMIN] ADMIN_CHAT_ID chưa cấu hình")
         return False
     try:
-        print(f"[ADMIN] forward_message -> ADMIN_CHAT_ID={ADMIN_CHAT_ID}")
         bot.forward_message(ADMIN_CHAT_ID, from_chat_id, message_id)
         print("[ADMIN] forward_message OK")
         return True
     except Exception as e:
         print("[ADMIN] forward_message ERROR:", repr(e))
         return False
-
-
-def set_state(chat_id, state):
-    user_state[chat_id] = state
-    print(f"[STATE] set for {chat_id} -> {state}")
-
-
-def clear_state(chat_id):
-    user_state[chat_id] = None
-    print(f"[STATE] cleared for {chat_id}")
-
-
-def get_tg_username(message):
-    return f"@{message.from_user.username}" if getattr(message.from_user, "username", None) else "Không có"
-
-
-def now_str():
-    return datetime.now().strftime("%H:%M:%S %d/%m/%Y")
 
 
 def start_markup():
@@ -246,38 +239,32 @@ def start_markup():
 # ============ DEBUG COMMANDS ============
 
 @bot.message_handler(commands=["myid"])
-def myid(message):
+def cmd_myid(message):
     print(f"[CMD] /myid from {message.chat.id}")
-    safe_send_message(
-        message.chat.id,
-        f"🆔 Chat ID của bạn là:\n`{message.chat.id}`",
-        parse_mode="Markdown"
-    )
+    safe_send_message(message.chat.id, f"🆔 Chat ID của bạn là:\n`{message.chat.id}`", parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["getid"])
-def enable_getid(message):
+def cmd_getid(message):
     chat_id = message.chat.id
     print(f"[CMD] /getid from {chat_id}")
     debug_get_id_mode.add(chat_id)
     safe_send_message(
         chat_id,
-        "✅ Đã bật chế độ lấy FILE_ID.\n"
-        "Gửi ảnh/video/file, bot sẽ trả FILE_ID.\n"
-        "Tắt bằng /stopgetid",
+        "✅ Đã bật chế độ lấy FILE_ID.\nGửi ảnh/video/file, bot sẽ trả FILE_ID.\nTắt bằng /stopgetid",
         parse_mode="Markdown"
     )
 
 
 @bot.message_handler(commands=["stopgetid"])
-def disable_getid(message):
+def cmd_stopgetid(message):
     chat_id = message.chat.id
     print(f"[CMD] /stopgetid from {chat_id}")
     debug_get_id_mode.discard(chat_id)
     safe_send_message(chat_id, "🛑 Đã tắt chế độ lấy FILE_ID.")
 
 
-# ============ ADMIN PANEL + BROADCAST ============
+# ============ ADMIN ============
 
 @bot.message_handler(commands=["admin"])
 def admin_panel(message):
@@ -300,7 +287,7 @@ def admin_stats(message):
 
 @bot.message_handler(func=lambda m: is_admin(m.chat.id) and (m.text or "") == "❌ Thoát")
 def admin_exit(message):
-    print(f"[ADMIN] Exit panel from {message.chat.id}")
+    print(f"[ADMIN] Exit from {message.chat.id}")
     admin_state.pop(message.chat.id, None)
     safe_send_message(message.chat.id, "Đã thoát admin.", reply_markup=types.ReplyKeyboardRemove())
 
@@ -312,9 +299,7 @@ def admin_broadcast_start(message):
     admin_state[chat_id] = {"mode": "BROADCAST_WAIT_MEDIA", "payload": None}
     safe_send_message(
         chat_id,
-        "📣 Hãy gửi *nội dung cần broadcast*.\n"
-        "✅ Hỗ trợ: *Text / Ảnh / Video* (có thể kèm caption).\n"
-        "Hủy: /cancel",
+        "📣 Hãy gửi *nội dung cần broadcast*.\n✅ Hỗ trợ: *Text / Ảnh / Video*.\nHủy: /cancel",
         parse_mode="Markdown"
     )
 
@@ -348,7 +333,7 @@ def _ask_broadcast_confirm(chat_id: int, preview_text: str):
 def admin_receive_broadcast_text(message):
     chat_id = message.chat.id
     text = (message.text or "").strip()
-    print(f"[ADMIN] Broadcast text received from {chat_id}: {text}")
+    print(f"[ADMIN] Broadcast text received: {text}")
     admin_state[chat_id]["payload"] = {"type": "text", "text": text}
     _ask_broadcast_confirm(chat_id, f"📝 *Text:*\n{text}")
 
@@ -361,7 +346,7 @@ def admin_receive_broadcast_photo(message):
     chat_id = message.chat.id
     file_id = message.photo[-1].file_id
     caption = (message.caption or "").strip()
-    print(f"[ADMIN] Broadcast photo received from {chat_id}")
+    print(f"[ADMIN] Broadcast photo received")
     admin_state[chat_id]["payload"] = {"type": "photo", "file_id": file_id, "caption": caption}
     preview = "🖼️ *Ảnh*"
     if caption:
@@ -377,7 +362,7 @@ def admin_receive_broadcast_video(message):
     chat_id = message.chat.id
     file_id = message.video.file_id
     caption = (message.caption or "").strip()
-    print(f"[ADMIN] Broadcast video received from {chat_id}")
+    print(f"[ADMIN] Broadcast video received")
     admin_state[chat_id]["payload"] = {"type": "video", "file_id": file_id, "caption": caption}
     preview = "🎬 *Video*"
     if caption:
@@ -389,6 +374,7 @@ def admin_receive_broadcast_video(message):
 def admin_broadcast_confirm(call):
     chat_id = call.message.chat.id
     print(f"[ADMIN CALLBACK] data={call.data} from {chat_id}")
+
     if not is_admin(chat_id):
         return bot.answer_callback_query(call.id, "No permission.")
 
@@ -406,10 +392,6 @@ def admin_broadcast_confirm(call):
 
     if not payload:
         bot.answer_callback_query(call.id, "Không có nội dung.")
-        try:
-            bot.edit_message_text("⚠️ Không có nội dung để gửi.", chat_id, call.message.message_id)
-        except Exception as e:
-            print("[ADMIN] edit no payload error:", repr(e))
         return
 
     try:
@@ -419,7 +401,7 @@ def admin_broadcast_confirm(call):
 
     users = get_all_users()
     sent, failed = 0, 0
-    print(f"[ADMIN] Broadcast to {len(users)} users")
+    print(f"[ADMIN] broadcast count={len(users)}")
 
     for uid in users:
         try:
@@ -432,7 +414,7 @@ def admin_broadcast_confirm(call):
             sent += 1
             time.sleep(0.05)
         except Exception as e:
-            print(f"[ADMIN] Broadcast failed to {uid}: {repr(e)}")
+            print(f"[ADMIN] broadcast fail uid={uid}: {repr(e)}")
             failed += 1
 
     safe_send_admin_message(f"✅ Broadcast xong.\nSent: {sent}\nFailed: {failed}")
@@ -442,7 +424,7 @@ def admin_broadcast_confirm(call):
 # ============ FLOW USER ============
 
 def ask_account_status(chat_id):
-    print(f"[FLOW] ask_account_status -> chat_id={chat_id}")
+    print(f"[FLOW] ask_account_status chat_id={chat_id}")
     text = (
         "👋 Chào anh/chị!\n"
         "Em là Bot hỗ trợ nhận CODE ưu đãi GG88.\n\n"
@@ -460,11 +442,10 @@ def ask_account_status(chat_id):
         safe_send_message(chat_id, text, reply_markup=start_markup())
 
     clear_state(chat_id)
-    log_state(chat_id)
 
 
 def ask_for_username(chat_id):
-    print(f"[FLOW] ask_for_username -> chat_id={chat_id}")
+    print(f"[FLOW] ask_for_username chat_id={chat_id}")
     text = (
         "Dạ ok anh/chị ❤️\n\n"
         "Anh/chị vui lòng gửi đúng *tên tài khoản* để em kiểm tra.\n\n"
@@ -482,7 +463,6 @@ def ask_for_username(chat_id):
         safe_send_message(chat_id, text, parse_mode="Markdown")
 
     set_state(chat_id, "WAITING_USERNAME")
-    log_state(chat_id)
 
 
 def process_username_step(message, username_game: str):
@@ -490,22 +470,18 @@ def process_username_step(message, username_game: str):
     print(f"[ENTER] process_username_step chat_id={chat_id} username={username_game}")
 
     set_state(chat_id, {"state": "WAITING_RECEIPT", "username_game": username_game})
-    log_state(chat_id)
-
-    tg_username = get_tg_username(message)
-    time_str = now_str()
 
     admin_text = (
         "🔔 Có khách mới gửi tên tài khoản\n\n"
-        f"👤 Telegram: {tg_username}\n"
+        f"👤 Telegram: {tg_username_of(message)}\n"
         f"🧾 Tên tài khoản: {username_game}\n"
-        f"⏰ Thời gian: {time_str}\n"
+        f"⏰ Thời gian: {now_str()}\n"
         f"🆔 Chat ID: {chat_id}"
     )
 
     ok1 = safe_send_admin_message(admin_text)
     ok2 = safe_forward_to_admin(chat_id, message.message_id)
-    print(f"[ADMIN] WAITING_USERNAME results: send_text={ok1} forward={ok2}")
+    print(f"[ADMIN] username notify results: send={ok1} forward={ok2}")
 
     reply_text = (
         f"Em đã nhận được tên tài khoản: *{username_game}* ✅\n\n"
@@ -515,18 +491,14 @@ def process_username_step(message, username_game: str):
         "👉 [Thùy Nhi CSKH GG88](https://t.me/thuynhi247)\n"
     )
 
-    print("[USER] sending reply after WAITING_USERNAME")
     ok = safe_send_photo(
         chat_id,
         "AgACAgUAAxkBAAMNabwGwy2JojJSdIZX10JeFki1nA0AAqQQaxveZOFVrqBWS9QIKQsBAAMCAAN5AAM6BA",
         caption=reply_text,
         parse_mode="Markdown"
     )
-    if ok:
-        print("[USER] send_photo reply OK")
-    else:
+    if not ok:
         safe_send_message(chat_id, reply_text, parse_mode="Markdown", disable_web_page_preview=True)
-        print("[USER] send_message fallback OK")
 
 
 @bot.message_handler(commands=["start"])
@@ -544,10 +516,11 @@ def callback_handler(call):
     upsert_user(chat_id)
 
     print(f"[CALLBACK] data={data} chat_id={chat_id}")
+
     try:
         bot.answer_callback_query(call.id)
     except Exception as e:
-        print("[CALLBACK] answer_callback_query error:", repr(e))
+        print("[CALLBACK] answer error:", repr(e))
 
     if data == "no_account":
         text = (
@@ -594,54 +567,40 @@ def handle_text(message):
     print("===================================")
 
     if is_admin(chat_id) and admin_state.get(chat_id, {}).get("mode") == "BROADCAST_WAIT_MEDIA":
-        print(f"[TEXT] admin broadcast mode, skip normal text handler for {chat_id}")
+        print("[TEXT] skip because admin broadcast mode")
         return
 
     if text in ["/start", "/admin", "/cancel", "/getid", "/stopgetid", "/myid"]:
         print("[TEXT] command detected, return")
         return
 
-    # ===== Nhánh chờ nhập thể loại game sau khi gửi ảnh CK =====
-    print("[CHECK] about to test WAITING_GAME branch")
     if isinstance(state, dict) and state.get("state") == "WAITING_GAME":
-        print(f"[ENTER] WAITING_GAME branch with text={text}")
-        game_type = text
-        try:
-            tg_username = get_tg_username(message)
-            time_str = now_str()
-
-            caption = (
-                "📩 KHÁCH GỬI CHUYỂN KHOẢN + CHỌN TRÒ CHƠI\n\n"
-                f"👤 Telegram: {tg_username}\n"
-                f"🧾 Tên tài khoản: {state.get('username_game', '(không rõ)')}\n"
-                f"🆔 Chat ID: {chat_id}\n"
-                f"🎯 Trò chơi: {game_type}\n"
-                f"⏰ Thời gian: {time_str}"
-            )
-
-            safe_send_admin_photo(state["receipt_file_id"], caption)
-            safe_send_message(chat_id, "✅ Em đã nhận đủ thông tin, admin sẽ xử lý cho mình ngay nhé ạ ❤️")
-        except Exception as e:
-            print("[WAITING_GAME] error:", repr(e))
-            safe_send_message(chat_id, "⚠️ Em gửi thông tin bị lỗi, mình đợi em 1 chút hoặc nhắn CSKH giúp em nhé ạ.")
-
+        print(f"[ENTER] WAITING_GAME with text={text}")
+        caption = (
+            "📩 KHÁCH GỬI CHUYỂN KHOẢN + CHỌN TRÒ CHƠI\n\n"
+            f"👤 Telegram: {tg_username_of(message)}\n"
+            f"🧾 Tên tài khoản: {state.get('username_game', '(không rõ)')}\n"
+            f"🆔 Chat ID: {chat_id}\n"
+            f"🎯 Trò chơi: {text}\n"
+            f"⏰ Thời gian: {now_str()}"
+        )
+        safe_send_admin_photo(state["receipt_file_id"], caption)
+        safe_send_message(chat_id, "✅ Em đã nhận đủ thông tin, admin sẽ xử lý cho mình ngay nhé ạ ❤️")
         clear_state(chat_id)
         return
 
-    # ===== Nhánh chuẩn: đang chờ username =====
-    print("[CHECK] about to test WAITING_USERNAME branch")
     if state == "WAITING_USERNAME":
+        print("[ENTER] WAITING_USERNAME branch")
         process_username_step(message, text)
         return
 
-    # ===== Fix chính: nếu state None nhưng user gửi text thường, vẫn coi như username =====
-    # Điều này giúp bot không im khi callback/state bị hụt
+    # FIX QUAN TRỌNG: dù state None vẫn xử lý text như username
     if state is None and text and not text.startswith("/"):
-        print("[FALLBACK] state=None but received normal text -> treat as username")
+        print("[FALLBACK] state=None -> treat as username")
         process_username_step(message, text)
         return
 
-    print(f"[TEXT] no matching state branch for chat_id={chat_id}")
+    print("[TEXT] no matching branch")
 
 
 @bot.message_handler(content_types=["photo", "document", "video"])
@@ -649,9 +608,8 @@ def handle_media(message):
     chat_id = message.chat.id
     upsert_user(chat_id)
 
-    print(f"[MEDIA] content_type={message.content_type} chat_id={chat_id} state={user_state.get(chat_id)}")
+    print(f"[MEDIA] type={message.content_type} chat_id={chat_id} state={user_state.get(chat_id)}")
 
-    # GET FILE_ID MODE
     if chat_id in debug_get_id_mode:
         if message.content_type == "photo":
             file_id = message.photo[-1].file_id
@@ -669,10 +627,7 @@ def handle_media(message):
     state = user_state.get(chat_id)
 
     if not (isinstance(state, dict) and state.get("state") == "WAITING_RECEIPT"):
-        safe_send_message(
-            chat_id,
-            "⚠️ Em chưa yêu cầu ảnh ở bước này ạ.\nAnh/chị bấm /start để bắt đầu lại giúp em nhé."
-        )
+        safe_send_message(chat_id, "⚠️ Em chưa yêu cầu ảnh ở bước này ạ.\nAnh/chị bấm /start để bắt đầu lại giúp em nhé.")
         return
 
     if message.content_type == "photo":
@@ -683,24 +638,20 @@ def handle_media(message):
         safe_send_message(chat_id, "Mình gửi *ảnh chuyển khoản* giúp em nhé ạ.", parse_mode="Markdown")
         return
 
-    username_game = state.get("username_game")
-
     set_state(chat_id, {
         "state": "WAITING_GAME",
         "receipt_file_id": receipt_file_id,
-        "username_game": username_game
+        "username_game": state.get("username_game")
     })
-    log_state(chat_id)
 
     safe_send_message(
         chat_id,
-        "🔔 Dạ mình thường chơi hũ hay bcr hay bóng anh nhỉ?\n"
-        "Admin sẽ có những khuyến mãi hot dành riêng cho mình nè!",
+        "🔔 Dạ mình thường chơi hũ hay bcr hay bóng anh nhỉ?\nAdmin sẽ có những khuyến mãi hot dành riêng cho mình nè!",
         parse_mode="Markdown"
     )
 
 
-# ============ WEBHOOK FLASK ============
+# ============ WEBHOOK ============
 
 @server.route("/webhook", methods=["POST"])
 def telegram_webhook():
